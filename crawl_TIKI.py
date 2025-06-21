@@ -69,8 +69,11 @@ def main():
     batch_size = 1000
     batch_number = 1
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = [executor.submit(get_product_from_tiki, data) for data in data_tiki]
+    with ThreadPoolExecutor(max_workers=25) as executor:
+        futures = []
+        for data in data_tiki:
+            future = executor.submit(get_product_from_tiki, data)
+            futures.append(future)
         for data in futures:
             try:
                 product_info = data.result()
@@ -97,31 +100,22 @@ def main():
                     logging.info(f"Product information id: {data}")
                     logging.info(json.dumps(info, indent=2))
                     
-                    # Ghi batch file mỗi 1000 request
-                    if len(all_products) % batch_size == 0:
+                    # Ghi batch file 1000 request/batch
+                    if len(all_products) == batch_size:
                         batch_filename = f'data_tiki_batch_{batch_number}.json'
                         write_file_json(batch_filename, all_products)
                         logging.info(f"Batch {batch_number} saved: {len(all_products)} products")
                         batch_number += 1
-                        
+                        all_products = []
+                  
                 else:
                     logging.info(f"Could not get product information id: {data}")
             except Exception as e:
                 logging.error(f"Unknown error with product {data}: {e}")
-
-    # Ghi file cuối cùng nếu còn dữ liệu
-    if all_products:
-        if len(all_products) % batch_size != 0:
-            # Nếu không đủ 1000, ghi file cuối cùng
-            final_batch_filename = f'data_tiki_batch_{batch_number}.json'
-            write_file_json(final_batch_filename, all_products)
-            logging.info(f"Final batch saved: {len(all_products)} products")
-        else:
-            # Nếu đủ 1000, ghi file tổng hợp
-            final_filename = 'data_tiki_final.json'
-            write_file_json(final_filename, all_products)
-            logging.info(f"All data saved to final file: {len(all_products)} products")
-
+        if all_products:
+            batch_filename = f'data_tiki_batch_{batch_number}.json'
+            write_file_json(batch_filename, all_products)
+            logging.info(f"Batch {batch_number} saved: {len(all_products)} products")
     end_time = time.time()
     elapsed_time = end_time - start_time
     logging.info(f"Total time: {elapsed_time:.2f} seconds")
