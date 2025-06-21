@@ -1,11 +1,17 @@
-import csv
+import time
 import logging
 import requests
 from requests.exceptions import HTTPError
 import json
+from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
 
+# Ghi log
 logging.basicConfig(filename='crawl_tiki.log',filemode='a',format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG)
 
+
+
+# Đọc file product_id để lấy id
 def read_file_csv(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
@@ -16,15 +22,17 @@ def read_file_csv(file_path):
         logging.error(f"Error read file {file_path}: {e}")
         return []
 
-def write_file_csv(file_path, data):
+# ghi ra file json
+def write_file_json(file_path, products):
     try: 
-        with open(file_path,'w', encoding='utf-8', newline='') as csvfile:
-            writer = csv.writer(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-            writer.writerow    (data)
+        with open(file_path,'w', encoding='utf-8') as outfile:
+            json.dump(products, outfile, ensure_ascii=False, indent=2)
+        logging.info(f"Json saved to {file_path}")
     except Exception as e:
-        logging.error(f"Error write file {file_path}: {e}")
+        logging.error(f"Error Json file {file_path}: {e}")
         return []
 
+# Get sp từ tiki
 def get_product_from_tiki(product_id: str):
     URL = f"https://api.tiki.vn/product-detail/api/v1/products/{product_id}"
     payload = {}
@@ -46,34 +54,80 @@ def get_product_from_tiki(product_id: str):
     except requests.exceptions.RequestException as e:
         logging.error(f"Error send message: {e}")
         return []
+# Parse html
+def clean_html(raw_html):
+    if not raw_html:
+        return ""
+    soup = BeautifulSoup(raw_html, "html.parser")
+    return soup.get_text(separator=" ", strip=True)
+
 
 def main():
+    start_time = time.time() 
     data_tiki = read_file_csv('products.csv')
+    all_products = []
+    batch_size = 1000
+    batch_number = 1
 
-    for data in data_tiki:
-        try:
-            product_info = get_product_from_tiki(data)
-            print(data)
-            if product_info:
-                id = product_info.get('id','N/A')
-                name = product_info.get('name','N/A')
-                url_key = product_info.get('url_key','N/A')
-                description = product_info.get('description','N/A')
-                images_url = product_info.get('images','N/A')
-                info = {
-                    "id":id,
-                    "name":name,
-                    "url_key":url_key,
-                    "description":description,
-                    "images_url":images_url
-                }
-                pretty_json = json.dumps(info,indent=2)
-                logging.info(f"Product information id: {data}")
-                logging.info(pretty_json)
-            else:
-                logging.info(f"Could not get product information id: {data}")
-        except Exception as e:
-            logging.error(f"Unknown error with product {data}: {e}")
-        write_file_csv('data_tiki.csv',pretty_json)
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(get_product_from_tiki, data) for data in data_tiki]
+        for data in futures:
+            try:
+                product_info = data.result()
+                
+                if product_info and isinstance(product_info, dict):
+                    id = product_info.get('id',[])
+                    name = product_info.get('name',[])
+                    url_key = product_info.get('url_key',[])
+                    price = product_info.get('price',[])
+                    description = product_info.get('description',[]) 
+                    images_url = product_info.get('images', [])
+                    base_urls = []
+                    for item in images_url:
+                        base_urls.append(item['base_url'])
+                    info = {
+                        "id":id,
+                        "name":clean_html(name),
+                        "url_key":url_key,
+                        "description":clean_html(description),
+                        "price":price,
+                        "images_url":base_urls
+                    }
+                    all_products.append(info)
+                    logging.info(f"Product information id: {data}")
+                    logging.info(json.dumps(info, indent=2))
+                    
+                    # Ghi batch file mỗi 1000 request
+                    if len(all_products) % batch_size == 0:
+                        batch_filename = f'data_tiki_batch_{batch_number}.json'
+                        write_file_json(batch_filename, all_products)
+                        logging.info(f"Batch {batch_number} saved: {len(all_products)} products")
+                        batch_number += 1
+                        
+                else:
+                    logging.info(f"Could not get product information id: {data}")
+            except Exception as e:
+                logging.error(f"Unknown error with product {data}: {e}")
+
+    # Ghi file cuối cùng nếu còn dữ liệu
+    if all_products:
+        if len(all_products) % batch_size != 0:
+            # Nếu không đủ 1000, ghi file cuối cùng
+            final_batch_filename = f'data_tiki_batch_{batch_number}.json'
+            write_file_json(final_batch_filename, all_products)
+            logging.info(f"Final batch saved: {len(all_products)} products")
+        else:
+            # Nếu đủ 1000, ghi file tổng hợp
+            final_filename = 'data_tiki_final.json'
+            write_file_json(final_filename, all_products)
+            logging.info(f"All data saved to final file: {len(all_products)} products")
+
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    logging.info(f"Total time: {elapsed_time:.2f} seconds")
+    if data_tiki:
+        logging.info(f"Average time: {(elapsed_time * 1000) / len(data_tiki):.2f} ms")
+    else:
+        logging.info("No products fetched!")
 if __name__ == "__main__":
     main()
