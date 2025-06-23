@@ -15,11 +15,11 @@ Script `crawl_TIKI.py` giúp tự động thu thập thông tin chi tiết sản
 
 ## Yêu cầu
 - Python 3.x
-- Các thư viện: `requests`, `beautifulsoup4`
+- Các thư viện: `requests`, `beautifulsoup4`,`time`,`logging`,`requests`,`HTTPError`,`json`,`re`,`os`,`pickle`,`ThreadPoolExecutor`
 
 Cài đặt thư viện:
 ```bash
-pip install requests beautifulsoup4
+pip install -r requirements.txt
 ```
 
 ## Hướng dẫn sử dụng
